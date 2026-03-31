@@ -14,7 +14,7 @@
 
   const STABLE_WINDOW_MS = 600;
   const MAX_STABLE_WAIT_MS = 10000;
-  const SCROLL_SETTLE_MS = 100;
+  const SCROLL_SETTLE_MS = 180;
   const KNOWN_HEADER_LABELS = new Set([
     "Organization Name",
     "Total Funding Amount",
@@ -782,6 +782,10 @@
   }
 
   function extractRowIdentifier(row, rowData, fallbackIndex) {
+    if (rowData.recordUrl) {
+      return `url:${rowData.recordUrl}`;
+    }
+
     const indexedAttributes = ["aria-rowindex", "data-rowindex", "row-index", "data-index"];
 
     for (const attribute of indexedAttributes) {
@@ -790,10 +794,6 @@
       if (Number.isFinite(value)) {
         return `row-index:${value}`;
       }
-    }
-
-    if (rowData.recordUrl) {
-      return `url:${rowData.recordUrl}`;
     }
 
     const signature = Object.values(rowData.cells).slice(0, 3).join("|");
@@ -831,6 +831,32 @@
         existingRow.cells[header] = value;
       }
     }
+  }
+
+  function getPrimaryHeaderNames(pageType) {
+    if (pageType === PAGE_TYPES.ORGANIZATIONS) {
+      return ["Organization Name"];
+    }
+
+    if (pageType === PAGE_TYPES.FUNDING_ROUNDS) {
+      return ["Funding Round Name"];
+    }
+
+    if (pageType === PAGE_TYPES.ACQUISITIONS) {
+      return ["Transaction Name", "Acquired Organization Name", "Acquiring Organization Name"];
+    }
+
+    return [];
+  }
+
+  function hasPrimaryEntityCell(rowData, pageType) {
+    const candidates = getPrimaryHeaderNames(pageType);
+
+    if (candidates.length === 0) {
+      return Object.keys(rowData.cells).length >= 2;
+    }
+
+    return candidates.some((header) => normalizeCellValue(rowData.cells[header]));
   }
 
   function extractRowsFromRoot(root, state, fallbackOffset) {
@@ -926,6 +952,10 @@
       }
 
       if (rowData.recordUrl === state.pageUrl || rowData.recordUrl.includes("/discover/")) {
+        return;
+      }
+
+      if (!hasPrimaryEntityCell(rowData, state.pageType)) {
         return;
       }
 
