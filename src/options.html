@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenCrunch Settings</title>
+    <link rel="stylesheet" href="./options.css" />
+  </head>
+  <body>
+    <main class="page">
+      <section class="panel">
+        <div class="eyebrow">OpenCrunch</div>
+        <h1>Airtable Settings</h1>
+        <p class="muted">
+          Save the Airtable token, base ID, and target table for the extension.
+        </p>
+
+        <label>
+          <span>Airtable PAT</span>
+          <input id="airtable-pat" type="password" autocomplete="off" />
+        </label>
+
+        <label>
+          <span>Base ID</span>
+          <input id="airtable-base-id" type="text" autocomplete="off" />
+        </label>
+
+        <label>
+          <span>Table Name or Table ID</span>
+          <input id="airtable-table-ref" type="text" autocomplete="off" />
+        </label>
+
+        <div class="actions">
+          <button id="save-settings" class="primary" type="button">Save Settings</button>
+          <button id="test-connection" class="secondary" type="button">Test Connection</button>
+        </div>
+
+        <pre id="status" class="status">No status yet.</pre>
+      </section>
+    </main>
+
+    <script type="module" src="./options.js"></script>
+  </body>
+</html>

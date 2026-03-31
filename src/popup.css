@@ -1,0 +1,96 @@
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI", Arial, sans-serif;
+  background: #f6f8fb;
+  color: #162034;
+}
+
+body {
+  margin: 0;
+  min-width: 340px;
+}
+
+.popup {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.panel {
+  background: #ffffff;
+  border: 1px solid #dce4ee;
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: 0 8px 24px rgba(20, 30, 58, 0.08);
+}
+
+.eyebrow {
+  color: #4262c7;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 6px 0 10px;
+  font-size: 20px;
+}
+
+.muted {
+  color: #5b6780;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.section-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #5b6780;
+  margin-bottom: 8px;
+}
+
+button {
+  width: 100%;
+  border: 0;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button + button {
+  margin-top: 10px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.primary {
+  background: linear-gradient(135deg, #146aff, #0d4fcc);
+  color: #ffffff;
+}
+
+.secondary {
+  background: #edf2ff;
+  color: #274fbb;
+}
+
+.summary {
+  margin: 0;
+  min-height: 120px;
+  background: #f8fafc;
+  border-radius: 12px;
+  border: 1px solid #e7edf5;
+  padding: 12px;
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #24324a;
+}

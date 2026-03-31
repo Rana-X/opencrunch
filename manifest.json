@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "OpenCrunch",
+  "version": "0.1.0",
+  "description": "Scrape the current Crunchbase results page and append the visible rows to Airtable.",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": [
+    "https://www.crunchbase.com/*",
+    "https://api.airtable.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "OpenCrunch",
+    "default_popup": "src/popup.html"
+  },
+  "options_page": "src/options.html",
+  "content_scripts": [
+    {
+      "matches": ["https://www.crunchbase.com/*"],
+      "js": ["src/content-script.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

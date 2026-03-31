@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenCrunch</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <main class="popup">
+      <section class="panel">
+        <div class="eyebrow">Crunchbase to Airtable</div>
+        <h1>OpenCrunch</h1>
+        <p id="page-status" class="muted">Checking the active tab…</p>
+        <button id="scrape-button" class="primary" disabled>Scrape Current Page</button>
+        <button id="open-options" class="secondary" type="button">Airtable Settings</button>
+      </section>
+
+      <section class="panel">
+        <div class="section-title">Run Summary</div>
+        <pre id="run-summary" class="summary">No scrape has been run yet.</pre>
+      </section>
+    </main>
+
+    <script type="module" src="./popup.js"></script>
+  </body>
+</html>
