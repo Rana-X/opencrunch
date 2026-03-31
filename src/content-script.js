@@ -1,7 +1,8 @@
 (function () {
   const MESSAGE_TYPES = {
     GET_PAGE_CONTEXT: "GET_PAGE_CONTEXT",
-    SCRAPE_CURRENT_PAGE: "SCRAPE_CURRENT_PAGE"
+    SCRAPE_CURRENT_PAGE: "SCRAPE_CURRENT_PAGE",
+    CAPTURE_DEBUG_SNAPSHOT: "CAPTURE_DEBUG_SNAPSHOT"
   };
 
   const PAGE_TYPES = {
@@ -14,6 +15,29 @@
   const STABLE_WINDOW_MS = 600;
   const MAX_STABLE_WAIT_MS = 10000;
   const SCROLL_SETTLE_MS = 100;
+  const KNOWN_HEADER_LABELS = new Set([
+    "Organization Name",
+    "Total Funding Amount",
+    "Stage",
+    "Industries",
+    "Headquarters Location",
+    "Description",
+    "CB Rank",
+    "Founded Date",
+    "Last Funding Type",
+    "Last Funding Date",
+    "Last Funding Amount",
+    "Number of Investors",
+    "Funding Round Name",
+    "Announced Date",
+    "Money Raised",
+    "Lead Investors",
+    "Investor Names",
+    "Acquired Organization Name",
+    "Acquiring Organization Name",
+    "Acquisition Date",
+    "Transaction Name"
+  ]);
 
   function sleep(ms) {
     return new Promise((resolve) => {
@@ -23,6 +47,34 @@
 
   function collapseWhitespace(value) {
     return String(value ?? "").replace(/\s+/g, " ").trim();
+  }
+
+  function safeTextContent(element) {
+    if (!element) {
+      return "";
+    }
+
+    try {
+      return element.innerText || element.textContent || "";
+    } catch {
+      try {
+        return element.textContent || "";
+      } catch {
+        return "";
+      }
+    }
+  }
+
+  function safeOuterHtml(element, maxLength = 2000) {
+    if (!element) {
+      return "";
+    }
+
+    try {
+      return String(element.outerHTML || "").slice(0, maxLength);
+    } catch {
+      return "";
+    }
   }
 
   function normalizeCellValue(value) {
@@ -93,7 +145,177 @@
     }
   }
 
+  function getEntityPathType(urlString) {
+    try {
+      const url = new URL(urlString, window.location.origin);
+      const pathname = url.pathname.toLowerCase();
+
+      if (/^\/organization\/[^/]+/.test(pathname)) {
+        return "organization";
+      }
+
+      if (/^\/funding[_-]round\/[^/]+/.test(pathname)) {
+        return "funding_round";
+      }
+
+      if (/^\/acquisition\/[^/]+/.test(pathname)) {
+        return "acquisition";
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  function getElementCenterX(element) {
+    const rect = element.getBoundingClientRect();
+    return rect.left + rect.width / 2;
+  }
+
+  function getKnownHeaderElements(root) {
+    return Array.from(root.querySelectorAll("*")).filter((element) => {
+      if (!isVisible(element)) {
+        return false;
+      }
+
+      const text = normalizeCellValue(safeTextContent(element));
+      return Boolean(text && KNOWN_HEADER_LABELS.has(text));
+    });
+  }
+
+  function getKnownHeaderModel(root) {
+    const headerElements = getKnownHeaderElements(root);
+
+    if (headerElements.length === 0) {
+      return [];
+    }
+
+    const ordered = headerElements
+      .map((element) => ({
+        element,
+        name: normalizeCellValue(safeTextContent(element)),
+        xCenter: getElementCenterX(element),
+        top: element.getBoundingClientRect().top
+      }))
+      .sort((left, right) => {
+        if (Math.abs(left.top - right.top) > 12) {
+          return left.top - right.top;
+        }
+
+        return left.xCenter - right.xCenter;
+      });
+
+    const deduped = [];
+    const seen = new Set();
+
+    for (const header of ordered) {
+      if (seen.has(header.name)) {
+        continue;
+      }
+
+      seen.add(header.name);
+      deduped.push({
+        index: deduped.length,
+        name: header.name,
+        xCenter: header.xCenter,
+        source: "known"
+      });
+    }
+
+    return deduped;
+  }
+
+  function getGridColumnId(element) {
+    if (!(element instanceof Element)) {
+      return null;
+    }
+
+    const explicitValue = element.getAttribute("data-columnid") || element.getAttribute("columnid");
+
+    if (explicitValue) {
+      return explicitValue;
+    }
+
+    const className = typeof element.className === "string" ? element.className : "";
+    const match = className.match(/column-id-([a-z0-9_-]+)/i);
+
+    return match ? match[1] : null;
+  }
+
+  function getHeaderTextFromGridColumnHeader(headerElement) {
+    if (!(headerElement instanceof Element)) {
+      return null;
+    }
+
+    const selectors = [
+      ".header-contents",
+      ".main-content",
+      ".component--field-formatter",
+      ".field-label",
+      ".label"
+    ];
+
+    for (const selector of selectors) {
+      const target = headerElement.querySelector(selector);
+      const text = normalizeCellValue(safeTextContent(target));
+
+      if (text) {
+        return text;
+      }
+    }
+
+    return normalizeCellValue(safeTextContent(headerElement));
+  }
+
+  function getGridHeaderModel(root) {
+    const headerElements = Array.from(root.querySelectorAll("grid-header grid-column-header")).filter(isVisible);
+
+    if (headerElements.length === 0) {
+      return [];
+    }
+
+    const mappedHeaders = headerElements
+      .map((element, index) => {
+        const columnId = getGridColumnId(element);
+        const name = getHeaderTextFromGridColumnHeader(element);
+
+        if (!name || !columnId || columnId === "select") {
+          return null;
+        }
+
+        return {
+          index,
+          columnId,
+          name,
+          xCenter: getElementCenterX(element),
+          source: "grid"
+        };
+      })
+      .filter(Boolean);
+
+    if (mappedHeaders.length === 0) {
+      return [];
+    }
+
+    const seenNames = new Set();
+    return mappedHeaders.filter((header) => {
+      if (seenNames.has(header.name)) {
+        return false;
+      }
+
+      seenNames.add(header.name);
+      return true;
+    });
+  }
+
   function getHeaderModel(root) {
+    const gridHeaders = getGridHeaderModel(root);
+
+    if (gridHeaders.length > 0) {
+      return gridHeaders;
+    }
+
     let headerElements = Array.from(root.querySelectorAll('[role="columnheader"]')).filter(isVisible);
 
     if (headerElements.length === 0) {
@@ -110,14 +332,89 @@
       }
     }
 
+    if (headerElements.length === 0) {
+      return getKnownHeaderModel(root);
+    }
+
     return headerElements.map((element, index) => ({
       index,
-      name: normalizeCellValue(element.innerText || element.textContent || "")
+      name: normalizeCellValue(safeTextContent(element)),
+      xCenter: getElementCenterX(element),
+      source: "structural"
     }));
   }
 
+  function isPotentialEntityLink(anchor) {
+    const href = anchor?.getAttribute?.("href") || "";
+    return Boolean(getEntityPathType(href));
+  }
+
+  function getHeuristicRowRoot(anchor, root) {
+    let current = anchor;
+    const rootRect = root.getBoundingClientRect();
+
+    while (current && current !== root) {
+      const rect = current.getBoundingClientRect();
+      const text = normalizeCellValue(safeTextContent(current));
+
+      if (
+        rect.width >= rootRect.width * 0.55 &&
+        rect.height >= 36 &&
+        rect.height <= 260 &&
+        text &&
+        text.length > 8
+      ) {
+        return current;
+      }
+
+      current = current.parentElement;
+    }
+
+    return anchor.closest("tr") || anchor.parentElement;
+  }
+
+  function getHeuristicRows(root) {
+    const anchors = Array.from(root.querySelectorAll("a[href]")).filter(
+      (anchor) => isVisible(anchor) && isPotentialEntityLink(anchor)
+    );
+    const rows = [];
+    const seen = new Set();
+    const headerElements = getKnownHeaderElements(root);
+    const headerBottom =
+      headerElements.length > 0
+        ? Math.max(...headerElements.map((element) => element.getBoundingClientRect().bottom))
+        : Number.NEGATIVE_INFINITY;
+
+    for (const anchor of anchors) {
+      const row = getHeuristicRowRoot(anchor, root);
+
+      if (!row || seen.has(row)) {
+        continue;
+      }
+
+       if (row.getBoundingClientRect().top <= headerBottom + 8) {
+        continue;
+      }
+
+      seen.add(row);
+      rows.push(row);
+    }
+
+    return rows.sort((left, right) => {
+      return left.getBoundingClientRect().top - right.getBoundingClientRect().top;
+    });
+  }
+
   function getBodyRows(root) {
-    let rows = Array.from(root.querySelectorAll('[role="row"]')).filter((row) => {
+    let rows = Array.from(root.querySelectorAll("grid-row")).filter((row) => {
+      return isVisible(row) && row.querySelector("grid-cell") !== null;
+    });
+
+    if (rows.length > 0) {
+      return rows;
+    }
+
+    rows = Array.from(root.querySelectorAll('[role="row"]')).filter((row) => {
       if (!isVisible(row)) {
         return false;
       }
@@ -133,6 +430,10 @@
       rows = Array.from(root.querySelectorAll("tbody tr")).filter((row) => {
         return isVisible(row) && row.querySelector("td") !== null;
       });
+    }
+
+    if (rows.length === 0) {
+      rows = getHeuristicRows(root);
     }
 
     return rows;
@@ -155,6 +456,10 @@
 
   function findBestGridRoot() {
     const selectors = [
+      "sheet-grid",
+      ".results-grid",
+      ".grid-container",
+      '[class*="grid-id-"]',
       '[role="grid"]',
       '[role="table"]',
       "table",
@@ -169,6 +474,17 @@
       document.querySelectorAll(selector).forEach((element) => candidates.add(element));
     }
 
+    getKnownHeaderElements(document.body).forEach((headerElement) => {
+      let current = headerElement.parentElement;
+      let depth = 0;
+
+      while (current && current !== document.body && depth < 8) {
+        candidates.add(current);
+        current = current.parentElement;
+        depth += 1;
+      }
+    });
+
     let best = null;
     let bestScore = -1;
 
@@ -182,6 +498,76 @@
     }
 
     return best;
+  }
+
+  function describeElement(element) {
+    if (!element) {
+      return null;
+    }
+
+    const rect = element.getBoundingClientRect();
+    return {
+      tagName: element.tagName.toLowerCase(),
+      id: element.id || "",
+      className: typeof element.className === "string" ? element.className : "",
+      role: element.getAttribute("role") || "",
+      dataTestId: element.getAttribute("data-testid") || "",
+      textSnippet: collapseWhitespace(safeTextContent(element)).slice(0, 240),
+      rect: {
+        top: Math.round(rect.top),
+        left: Math.round(rect.left),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      },
+      htmlSnippet: safeOuterHtml(element, 2000)
+    };
+  }
+
+  function getCandidateDebugInfo() {
+    const selectors = [
+      "sheet-grid",
+      ".results-grid",
+      ".grid-container",
+      '[class*="grid-id-"]',
+      '[role="grid"]',
+      '[role="table"]',
+      "table",
+      "multi-search-results",
+      '[data-testid*="grid"]',
+      '[data-testid*="table"]'
+    ];
+    const candidates = new Set();
+
+    for (const selector of selectors) {
+      document.querySelectorAll(selector).forEach((element) => candidates.add(element));
+    }
+
+    getKnownHeaderElements(document.body).forEach((headerElement) => {
+      let current = headerElement.parentElement;
+      let depth = 0;
+
+      while (current && current !== document.body && depth < 8) {
+        candidates.add(current);
+        current = current.parentElement;
+        depth += 1;
+      }
+    });
+
+    return Array.from(candidates)
+      .map((candidate) => {
+        const headerModel = getHeaderModel(candidate).filter((header) => header.name);
+        const rows = getBodyRows(candidate);
+
+        return {
+          score: scoreCandidate(candidate),
+          descriptor: describeElement(candidate),
+          headerNames: headerModel.map((header) => header.name).slice(0, 20),
+          rowCount: rows.length
+        };
+      })
+      .filter((candidate) => candidate.score >= 0)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 8);
   }
 
   function waitForDomStability() {
@@ -289,7 +675,13 @@
   }
 
   function getCellElements(row) {
-    let cells = Array.from(row.querySelectorAll('[role="gridcell"]')).filter(isVisible);
+    let cells = Array.from(row.querySelectorAll(":scope > grid-cell")).filter(isVisible);
+
+    if (cells.length > 0) {
+      return cells;
+    }
+
+    cells = Array.from(row.querySelectorAll('[role="gridcell"]')).filter(isVisible);
 
     if (cells.length === 0) {
       cells = Array.from(row.querySelectorAll("td")).filter(isVisible);
@@ -297,6 +689,93 @@
 
     if (cells.length === 0) {
       cells = Array.from(row.children).filter(isVisible);
+    }
+
+    return cells;
+  }
+
+  function getLeafTextElements(row) {
+    return Array.from(row.querySelectorAll("a, span, div, p")).filter((element) => {
+      if (!isVisible(element)) {
+        return false;
+      }
+
+      const text = normalizeCellValue(safeTextContent(element));
+
+      if (!text || text.length < 2) {
+        return false;
+      }
+
+      const rect = element.getBoundingClientRect();
+
+      if (rect.height > 180 || rect.width > row.getBoundingClientRect().width * 0.9) {
+        return false;
+      }
+
+      for (const child of Array.from(element.children)) {
+        if (!isVisible(child)) {
+          continue;
+        }
+
+        const childText = normalizeCellValue(safeTextContent(child));
+
+        if (childText && childText === text) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }
+
+  function extractCellsByGeometry(row, headerModel) {
+    const grouped = new Map();
+    const textElements = getLeafTextElements(row);
+
+    for (const element of textElements) {
+      const payload = extractCellPayload(element);
+
+      if (!payload.value) {
+        continue;
+      }
+
+      let nearestHeader = null;
+      let nearestDistance = Number.POSITIVE_INFINITY;
+      const xCenter = getElementCenterX(element);
+
+      for (const header of headerModel) {
+        if (!header.name || typeof header.xCenter !== "number") {
+          continue;
+        }
+
+        const distance = Math.abs(header.xCenter - xCenter);
+
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestHeader = header;
+        }
+      }
+
+      if (!nearestHeader) {
+        continue;
+      }
+
+      const existing = grouped.get(nearestHeader.name) ?? [];
+
+      if (!existing.includes(payload.value)) {
+        existing.push(payload.value);
+        grouped.set(nearestHeader.name, existing);
+      }
+    }
+
+    const cells = {};
+
+    for (const [header, values] of grouped.entries()) {
+      const merged = normalizeCellValue(values.join(" | "));
+
+      if (merged) {
+        cells[header] = merged;
+      }
     }
 
     return cells;
@@ -330,10 +809,10 @@
     const anchor = cell.querySelector("a[href]");
     const directTitle = cell.getAttribute("title");
     const ariaLabel = cell.getAttribute("aria-label");
-    const visibleText = normalizeCellValue(cell.innerText || cell.textContent || "");
+    const visibleText = normalizeCellValue(safeTextContent(cell));
     const titleText = normalizeCellValue(directTitle);
     const ariaText = normalizeCellValue(ariaLabel);
-    const anchorText = normalizeCellValue(anchor?.innerText || anchor?.textContent || "");
+    const anchorText = normalizeCellValue(safeTextContent(anchor));
     const value = visibleText || titleText || ariaText || anchorText || null;
 
     return {
@@ -357,6 +836,11 @@
   function extractRowsFromRoot(root, state, fallbackOffset) {
     const headerModel = getHeaderModel(root);
     const rows = getBodyRows(root);
+    const headerByColumnId = new Map(
+      headerModel
+        .filter((header) => header?.columnId && header?.name)
+        .map((header) => [header.columnId, header])
+    );
 
     for (const header of headerModel) {
       if (header.name && !state.headerSet.has(header.name)) {
@@ -373,28 +857,80 @@
         sourcePageUrl: state.pageUrl,
         scrapedAt: state.scrapedAt
       };
+      const hasGridCellMapping = cells.some((cell) => {
+        const columnId = getGridColumnId(cell);
+        return Boolean(columnId && headerByColumnId.has(columnId));
+      });
 
-      for (let cellIndex = 0; cellIndex < Math.min(cells.length, headerModel.length); cellIndex += 1) {
-        const header = headerModel[cellIndex];
+      const shouldUseGeometryFallback =
+        !hasGridCellMapping &&
+        (
+          headerModel.some((header) => header?.source === "known") ||
+          cells.length === 0 ||
+          (headerModel.length >= 4 && cells.length < Math.ceil(headerModel.length / 2))
+        );
 
-        if (!header?.name) {
-          continue;
+      if (hasGridCellMapping) {
+        for (const cell of cells) {
+          const columnId = getGridColumnId(cell);
+
+          if (!columnId || columnId === "select") {
+            continue;
+          }
+
+          const header = headerByColumnId.get(columnId);
+
+          if (!header?.name) {
+            continue;
+          }
+
+          const cellPayload = extractCellPayload(cell);
+
+          if (cellPayload.value != null) {
+            rowData.cells[header.name] = cellPayload.value;
+          }
+
+          if (!rowData.recordUrl && cellPayload.recordUrl) {
+            rowData.recordUrl = cellPayload.recordUrl;
+          }
         }
+      } else if (shouldUseGeometryFallback) {
+        rowData.cells = extractCellsByGeometry(row, headerModel);
+      } else {
+        for (let cellIndex = 0; cellIndex < Math.min(cells.length, headerModel.length); cellIndex += 1) {
+          const header = headerModel[cellIndex];
 
-        const cellPayload = extractCellPayload(cells[cellIndex]);
+          if (!header?.name) {
+            continue;
+          }
 
-        if (cellPayload.value != null) {
-          rowData.cells[header.name] = cellPayload.value;
-        }
+          const cellPayload = extractCellPayload(cells[cellIndex]);
 
-        if (!rowData.recordUrl && cellPayload.recordUrl) {
-          rowData.recordUrl = cellPayload.recordUrl;
+          if (cellPayload.value != null) {
+            rowData.cells[header.name] = cellPayload.value;
+          }
+
+          if (!rowData.recordUrl && cellPayload.recordUrl) {
+            rowData.recordUrl = cellPayload.recordUrl;
+          }
         }
       }
 
       if (!rowData.recordUrl) {
         const rowAnchor = row.querySelector("a[href]");
         rowData.recordUrl = getCrunchbaseUrlFromAnchor(rowAnchor);
+      }
+
+      if (!rowData.recordUrl || !getEntityPathType(rowData.recordUrl)) {
+        return;
+      }
+
+      if (rowData.recordUrl === state.pageUrl || rowData.recordUrl.includes("/discover/")) {
+        return;
+      }
+
+      if (Object.keys(rowData.cells).length < 2) {
+        return;
       }
 
       const rowKey = extractRowIdentifier(row, rowData, fallbackOffset + rowIndex);
@@ -416,7 +952,7 @@
       return directPage;
     }
 
-    const pageText = document.body.innerText.match(/(\d+)\s*-\s*(\d+)\s+(?:Next|of)/i);
+    const pageText = safeTextContent(document.body).match(/(\d+)\s*-\s*(\d+)\s+(?:Next|of)/i);
 
     if (!pageText) {
       return 1;
@@ -517,6 +1053,44 @@
     };
   }
 
+  async function captureDebugSnapshot() {
+    const root = await getStableGridRoot();
+    const headerModel = root ? getHeaderModel(root).filter((header) => header.name) : [];
+    const rows = root ? getBodyRows(root) : [];
+    const verticalContainer = root ? findScrollableAncestor(root, "y") : null;
+    const horizontalContainer = root ? findScrollableAncestor(root, "x") : null;
+
+    return {
+      generatedAt: new Date().toISOString(),
+      pageUrl: window.location.href,
+      pageTitle: document.title,
+      pageType: inferPageType(),
+      supported: Boolean(root),
+      headerCount: headerModel.length,
+      rowCountEstimate: rows.length,
+      selectedRoot: describeElement(root),
+      verticalScrollContainer: describeElement(verticalContainer),
+      horizontalScrollContainer: describeElement(horizontalContainer),
+      headers: headerModel.slice(0, 40).map((header) => ({
+        name: header.name,
+        source: header.source || "",
+        xCenter: typeof header.xCenter === "number" ? Math.round(header.xCenter) : null
+      })),
+      sampleRows: rows.slice(0, 5).map((row) => {
+        const anchor = row.querySelector("a[href]");
+        return {
+          recordUrl: getCrunchbaseUrlFromAnchor(anchor),
+          descriptor: describeElement(row)
+        };
+      }),
+      candidateRoots: getCandidateDebugInfo(),
+      knownHeaderTexts: getKnownHeaderElements(document.body)
+        .map((element) => normalizeCellValue(safeTextContent(element)))
+        .filter(Boolean)
+        .slice(0, 30)
+    };
+  }
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === MESSAGE_TYPES.GET_PAGE_CONTEXT) {
       getPageContext()
@@ -529,6 +1103,14 @@
     if (message?.type === MESSAGE_TYPES.SCRAPE_CURRENT_PAGE) {
       collectScrapePayload()
         .then((payload) => sendResponse({ ok: true, payload }))
+        .catch((error) => sendResponse({ ok: false, error: { message: error.message } }));
+
+      return true;
+    }
+
+    if (message?.type === MESSAGE_TYPES.CAPTURE_DEBUG_SNAPSHOT) {
+      captureDebugSnapshot()
+        .then((snapshot) => sendResponse({ ok: true, snapshot }))
         .catch((error) => sendResponse({ ok: false, error: { message: error.message } }));
 
       return true;

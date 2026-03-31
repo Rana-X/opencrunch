@@ -1,17 +1,26 @@
-import { MESSAGE_TYPES, STORAGE_KEYS } from "./lib/constants.js";
+import {
+  DEFAULT_GOOGLE_SHEETS_CONFIG,
+  MESSAGE_TYPES,
+  STORAGE_KEYS
+} from "./lib/constants.js";
 
-const patInput = document.getElementById("airtable-pat");
-const baseIdInput = document.getElementById("airtable-base-id");
-const tableRefInput = document.getElementById("airtable-table-ref");
+const scriptUrlInput = document.getElementById("google-script-url");
+const spreadsheetIdInput = document.getElementById("google-spreadsheet-id");
+const sheetNameInput = document.getElementById("google-sheet-name");
+const sharedSecretInput = document.getElementById("google-shared-secret");
 const saveButton = document.getElementById("save-settings");
 const testButton = document.getElementById("test-connection");
 const statusEl = document.getElementById("status");
 
 function currentConfig() {
   return {
-    airtablePat: patInput.value.trim(),
-    airtableBaseId: baseIdInput.value.trim(),
-    airtableTableRef: tableRefInput.value.trim()
+    googleScriptUrl:
+      scriptUrlInput.value.trim() || DEFAULT_GOOGLE_SHEETS_CONFIG.googleScriptUrl,
+    googleSpreadsheetId:
+      spreadsheetIdInput.value.trim() || DEFAULT_GOOGLE_SHEETS_CONFIG.googleSpreadsheetId,
+    googleSheetName: sheetNameInput.value.trim() || DEFAULT_GOOGLE_SHEETS_CONFIG.googleSheetName,
+    googleSharedSecret:
+      sharedSecretInput.value.trim() || DEFAULT_GOOGLE_SHEETS_CONFIG.googleSharedSecret
   };
 }
 
@@ -21,33 +30,42 @@ function setStatus(lines) {
 
 async function loadSettings() {
   const values = await chrome.storage.local.get([
-    STORAGE_KEYS.AIRTABLE_PAT,
-    STORAGE_KEYS.AIRTABLE_BASE_ID,
-    STORAGE_KEYS.AIRTABLE_TABLE_REF
+    STORAGE_KEYS.GOOGLE_SCRIPT_URL,
+    STORAGE_KEYS.GOOGLE_SPREADSHEET_ID,
+    STORAGE_KEYS.GOOGLE_SHEET_NAME,
+    STORAGE_KEYS.GOOGLE_SHARED_SECRET
   ]);
 
-  patInput.value = values[STORAGE_KEYS.AIRTABLE_PAT] ?? "";
-  baseIdInput.value = values[STORAGE_KEYS.AIRTABLE_BASE_ID] ?? "";
-  tableRefInput.value = values[STORAGE_KEYS.AIRTABLE_TABLE_REF] ?? "";
+  scriptUrlInput.value =
+    values[STORAGE_KEYS.GOOGLE_SCRIPT_URL] ?? DEFAULT_GOOGLE_SHEETS_CONFIG.googleScriptUrl;
+  spreadsheetIdInput.value =
+    values[STORAGE_KEYS.GOOGLE_SPREADSHEET_ID] ??
+    DEFAULT_GOOGLE_SHEETS_CONFIG.googleSpreadsheetId;
+  sheetNameInput.value =
+    values[STORAGE_KEYS.GOOGLE_SHEET_NAME] ?? DEFAULT_GOOGLE_SHEETS_CONFIG.googleSheetName;
+  sharedSecretInput.value =
+    values[STORAGE_KEYS.GOOGLE_SHARED_SECRET] ??
+    DEFAULT_GOOGLE_SHEETS_CONFIG.googleSharedSecret;
 }
 
 async function saveSettings() {
   const config = currentConfig();
 
   await chrome.storage.local.set({
-    [STORAGE_KEYS.AIRTABLE_PAT]: config.airtablePat,
-    [STORAGE_KEYS.AIRTABLE_BASE_ID]: config.airtableBaseId,
-    [STORAGE_KEYS.AIRTABLE_TABLE_REF]: config.airtableTableRef
+    [STORAGE_KEYS.GOOGLE_SCRIPT_URL]: config.googleScriptUrl,
+    [STORAGE_KEYS.GOOGLE_SPREADSHEET_ID]: config.googleSpreadsheetId,
+    [STORAGE_KEYS.GOOGLE_SHEET_NAME]: config.googleSheetName,
+    [STORAGE_KEYS.GOOGLE_SHARED_SECRET]: config.googleSharedSecret
   });
 
   setStatus("Settings saved.");
 }
 
 async function testConnection() {
-  setStatus("Testing Airtable connection...");
+  setStatus("Testing Google Sheets connection...");
 
   const response = await chrome.runtime.sendMessage({
-    type: MESSAGE_TYPES.TEST_AIRTABLE_CONNECTION,
+    type: MESSAGE_TYPES.TEST_GOOGLE_SHEETS_CONNECTION,
     config: currentConfig()
   });
 
@@ -59,9 +77,10 @@ async function testConnection() {
   const result = response.result;
   setStatus([
     "Connection OK.",
-    `Table name: ${result.tableName}`,
-    `Table id: ${result.tableId}`,
-    `Fields: ${result.fieldCount}`
+    `Spreadsheet: ${result.spreadsheetTitle}`,
+    `Sheet: ${result.sheetName}`,
+    `Header count: ${result.headerCount}`,
+    `Created new sheet: ${result.createdSheet ? "yes" : "no"}`
   ]);
 }
 

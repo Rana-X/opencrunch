@@ -81,6 +81,12 @@ button:disabled {
   color: #274fbb;
 }
 
+.tertiary {
+  background: #f7f9fc;
+  color: #3b4e77;
+  border: 1px solid #dce4ee;
+}
+
 .summary {
   margin: 0;
   min-height: 120px;

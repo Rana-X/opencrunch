@@ -1,14 +1,28 @@
 export const MESSAGE_TYPES = {
   GET_PAGE_CONTEXT: "GET_PAGE_CONTEXT",
   SCRAPE_CURRENT_PAGE: "SCRAPE_CURRENT_PAGE",
-  APPEND_TO_AIRTABLE: "APPEND_TO_AIRTABLE",
-  TEST_AIRTABLE_CONNECTION: "TEST_AIRTABLE_CONNECTION"
+  CAPTURE_DEBUG_SNAPSHOT: "CAPTURE_DEBUG_SNAPSHOT",
+  APPEND_TO_GOOGLE_SHEETS: "APPEND_TO_GOOGLE_SHEETS",
+  TEST_GOOGLE_SHEETS_CONNECTION: "TEST_GOOGLE_SHEETS_CONNECTION"
 };
 
 export const STORAGE_KEYS = {
-  AIRTABLE_PAT: "airtablePat",
-  AIRTABLE_BASE_ID: "airtableBaseId",
-  AIRTABLE_TABLE_REF: "airtableTableRef"
+  GOOGLE_SCRIPT_URL: "googleScriptUrl",
+  GOOGLE_SPREADSHEET_ID: "googleSpreadsheetId",
+  GOOGLE_SHEET_NAME: "googleSheetName",
+  GOOGLE_SHARED_SECRET: "googleSharedSecret",
+  PINNED_CRUNCHBASE_TAB_ID: "pinnedCrunchbaseTabId",
+  LAST_RUN_SUMMARY: "lastRunSummary",
+  LAST_PAGE_STATUS: "lastPageStatus",
+  LAST_DEBUG_SNAPSHOT: "lastDebugSnapshot"
+};
+
+export const DEFAULT_GOOGLE_SHEETS_CONFIG = {
+  googleScriptUrl:
+    "https://script.google.com/macros/s/AKfycbx3eL-zfjXRaEy1QVwFi6caEeHxA86TKFJfACuE8i6ct0mIT4LkmtAkizsFp95pV8VF/exec",
+  googleSpreadsheetId: "13fL3BRtmmbT_MWTFItCbGCqcM4SxgLUlSDgYGAEqUrc",
+  googleSheetName: "Sheet1",
+  googleSharedSecret: ""
 };
 
 export const ERROR_CODES = {
@@ -17,9 +31,6 @@ export const ERROR_CODES = {
   TABLE_NOT_READY: "TABLE_NOT_READY",
   EMPTY_RESULTS: "EMPTY_RESULTS",
   MISSING_CONFIG: "MISSING_CONFIG",
-  AIRTABLE_AUTH_ERROR: "AIRTABLE_AUTH_ERROR",
-  AIRTABLE_SCHEMA_MISMATCH: "AIRTABLE_SCHEMA_MISMATCH",
-  AIRTABLE_WRITE_PARTIAL: "AIRTABLE_WRITE_PARTIAL",
   NETWORK_ERROR: "NETWORK_ERROR"
 };
 
@@ -28,16 +39,6 @@ export const PAGE_TYPES = {
   FUNDING_ROUNDS: "funding_rounds",
   ACQUISITIONS: "acquisitions",
   UNKNOWN: "unknown"
-};
-
-export const AIRTABLE_BASE_URL = "https://api.airtable.com";
-export const AIRTABLE_BATCH_SIZE = 10;
-export const AIRTABLE_BATCH_DELAY_MS = 225;
-
-export const OPTIONAL_METADATA_FIELDS = {
-  CRUNCHBASE_URL: "Crunchbase URL",
-  SOURCE_PAGE_URL: "Source Page URL",
-  SCRAPED_AT: "Scraped At"
 };
 
 export const SUPPORTED_HOST = "www.crunchbase.com";
