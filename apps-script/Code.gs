@@ -1,4 +1,5 @@
 const SHARED_SECRET = "";
+const NULL_SENTINEL = "NULL";
 
 function doPost(e) {
   try {
@@ -134,11 +135,11 @@ function buildSheetRow(headers, row) {
 
   return headers.map(function (header) {
     if (!Object.prototype.hasOwnProperty.call(source, header)) {
-      return "";
+      return NULL_SENTINEL;
     }
 
     const value = source[header];
-    return value == null ? "" : value;
+    return value == null ? NULL_SENTINEL : value;
   });
 }
 

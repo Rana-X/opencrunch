@@ -8,12 +8,15 @@
 body {
   margin: 0;
   min-width: 340px;
+  min-height: 100vh;
 }
 
 .popup {
   display: grid;
   gap: 12px;
   padding: 16px;
+  box-sizing: border-box;
+  min-height: 100vh;
 }
 
 .panel {
@@ -35,6 +38,14 @@ body {
 h1 {
   margin: 6px 0 10px;
   font-size: 20px;
+}
+
+.target-status {
+  margin: 0 0 8px;
+  color: #274fbb;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
 }
 
 .muted {
@@ -79,6 +90,11 @@ button:disabled {
 .secondary {
   background: #edf2ff;
   color: #274fbb;
+}
+
+.secondary.subtle {
+  background: #f4f7ff;
+  color: #35539b;
 }
 
 .tertiary {

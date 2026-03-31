@@ -6,15 +6,23 @@ import {
 } from "./lib/constants.js";
 
 const pageStatusEl = document.getElementById("page-status");
+const targetStatusEl = document.getElementById("target-status");
+const attachButtonEl = document.getElementById("attach-button");
 const scrapeButtonEl = document.getElementById("scrape-button");
 const debugButtonEl = document.getElementById("debug-button");
 const openOptionsEl = document.getElementById("open-options");
 const runSummaryEl = document.getElementById("run-summary");
 
 let targetTabId = null;
+let refreshTimerId = null;
 
 function renderSummary(lines) {
   runSummaryEl.textContent = Array.isArray(lines) ? lines.join("\n") : String(lines);
+}
+
+function setButtonState(button, label, disabled) {
+  button.textContent = label;
+  button.disabled = disabled;
 }
 
 async function persistPopupState(updates) {
@@ -32,12 +40,36 @@ function setPageStatus(message) {
   }).catch(() => {});
 }
 
+function setTargetStatus(message) {
+  targetStatusEl.textContent = message;
+}
+
 function formatError(error) {
   if (!error) {
     return "Unknown error.";
   }
 
   return error.message || error.code || "Unknown error.";
+}
+
+function safeHostname(urlString) {
+  try {
+    return new URL(urlString).hostname;
+  } catch {
+    return "";
+  }
+}
+
+function isCrunchbaseTab(tab) {
+  return Boolean(tab?.url && safeHostname(tab.url) === SUPPORTED_HOST);
+}
+
+function getTabLabel(tab, context) {
+  if (context?.pageType) {
+    return `${context.pageType} on "${tab?.title || "Crunchbase"}"`;
+  }
+
+  return tab?.title || "Crunchbase tab";
 }
 
 async function getActiveTab() {
@@ -69,7 +101,7 @@ async function getStoredConfig() {
     [STORAGE_KEYS.LAST_RUN_SUMMARY]:
       values[STORAGE_KEYS.LAST_RUN_SUMMARY] ?? "No scrape has been run yet.",
     [STORAGE_KEYS.LAST_PAGE_STATUS]:
-      values[STORAGE_KEYS.LAST_PAGE_STATUS] ?? "Checking the active tab…",
+      values[STORAGE_KEYS.LAST_PAGE_STATUS] ?? "Checking the current tab…",
     [STORAGE_KEYS.LAST_DEBUG_SNAPSHOT]: values[STORAGE_KEYS.LAST_DEBUG_SNAPSHOT] ?? ""
   };
 }
@@ -96,6 +128,7 @@ async function getTabById(tabId) {
 }
 
 async function pinCrunchbaseTab(tabId) {
+  targetTabId = tabId;
   await persistPopupState({
     [STORAGE_KEYS.PINNED_CRUNCHBASE_TAB_ID]: tabId
   });
@@ -106,32 +139,171 @@ async function clearPinnedCrunchbaseTab() {
   await removePopupState([STORAGE_KEYS.PINNED_CRUNCHBASE_TAB_ID]);
 }
 
-async function useResolvedContext(tabId, context, message, { preserveStatus = false } = {}) {
-  targetTabId = tabId;
-  scrapeButtonEl.disabled = false;
-  debugButtonEl.disabled = false;
-  await pinCrunchbaseTab(tabId);
+async function getSupportedActiveCrunchbaseState() {
+  const activeTab = await getActiveTab();
 
-  if (!preserveStatus) {
-    setPageStatus(message);
+  if (!activeTab?.id || !isCrunchbaseTab(activeTab)) {
+    throw new Error("Open a supported Crunchbase results tab first.");
   }
+
+  const response = await getTabContext(activeTab.id);
+
+  if (!response?.ok || !response.context?.supported) {
+    throw new Error(
+      response?.context?.reason ||
+        response?.error?.message ||
+        "No Crunchbase results table detected on the current tab."
+    );
+  }
+
+  return {
+    tab: activeTab,
+    context: response.context
+  };
+}
+
+async function attachCurrentTab() {
+  const activeState = await getSupportedActiveCrunchbaseState();
+  await pinCrunchbaseTab(activeState.tab.id);
+  setTargetStatus(`Locked to ${getTabLabel(activeState.tab, activeState.context)}.`);
+  setPageStatus("Attached to the current Crunchbase tab.");
+  await loadPageContext({ preserveStatus: true });
+}
+
+async function resolvePanelState() {
+  const stored = await getStoredConfig();
+  const activeTab = await getActiveTab();
+  let lockedTabId = Number.isInteger(stored[STORAGE_KEYS.PINNED_CRUNCHBASE_TAB_ID])
+    ? stored[STORAGE_KEYS.PINNED_CRUNCHBASE_TAB_ID]
+    : null;
+  let lockedTab = null;
+  let lockedContext = null;
+
+  if (lockedTabId != null) {
+    lockedTab = await getTabById(lockedTabId);
+
+    if (!lockedTab || !isCrunchbaseTab(lockedTab)) {
+      await clearPinnedCrunchbaseTab();
+      lockedTabId = null;
+      lockedTab = null;
+    } else {
+      lockedContext = await getTabContext(lockedTabId);
+      targetTabId = lockedTabId;
+    }
+  }
+
+  let activeContext = null;
+
+  if (activeTab?.id && isCrunchbaseTab(activeTab)) {
+    activeContext = await getTabContext(activeTab.id);
+  }
+
+  return {
+    stored,
+    activeTab,
+    activeContext,
+    lockedTabId,
+    lockedTab,
+    lockedContext
+  };
+}
+
+function applyButtonState(state) {
+  const activeSupported = Boolean(state.activeContext?.ok && state.activeContext.context?.supported);
+  const activeCrunchbase = isCrunchbaseTab(state.activeTab);
+  const hasLockedTab = Number.isInteger(state.lockedTabId);
+  const isLockedToCurrent = hasLockedTab && state.activeTab?.id === state.lockedTabId;
+
+  if (activeSupported) {
+    if (isLockedToCurrent) {
+      setButtonState(attachButtonEl, "Attached to Current Tab", true);
+      setButtonState(scrapeButtonEl, "Scrape Current Page", false);
+    } else {
+      setButtonState(
+        attachButtonEl,
+        hasLockedTab ? "Attach Current Tab Instead" : "Attach Current Tab",
+        false
+      );
+      setButtonState(scrapeButtonEl, "Attach & Scrape Current Tab", false);
+    }
+  } else {
+    setButtonState(attachButtonEl, "Attach Current Tab", true);
+    setButtonState(
+      scrapeButtonEl,
+      hasLockedTab ? "Scrape Current Page" : "Attach & Scrape Current Tab",
+      true
+    );
+  }
+
+  debugButtonEl.disabled = !(hasLockedTab || activeCrunchbase);
+}
+
+function describePageStatus(state) {
+  const activeSupported = Boolean(state.activeContext?.ok && state.activeContext.context?.supported);
+  const activeCrunchbase = isCrunchbaseTab(state.activeTab);
+  const lockedSupported = Boolean(state.lockedContext?.ok && state.lockedContext.context?.supported);
+  const hasLockedTab = Number.isInteger(state.lockedTabId);
+  const isLockedToCurrent = hasLockedTab && state.activeTab?.id === state.lockedTabId;
+
+  if (!hasLockedTab) {
+    setTargetStatus(
+      activeSupported
+        ? "Not attached yet. The current Crunchbase tab is ready."
+        : "Not attached to a Crunchbase tab yet."
+    );
+
+    if (activeSupported) {
+      const { pageType, headerCount, rowCountEstimate } = state.activeContext.context;
+      return `Current tab is ready on ${pageType}. Detected ${headerCount} headers and ${rowCountEstimate} visible rows.`;
+    }
+
+    if (activeCrunchbase) {
+      return (
+        state.activeContext?.context?.reason ||
+        state.activeContext?.error?.message ||
+        "No Crunchbase results table detected on the current tab."
+      );
+    }
+
+    return "Open a Crunchbase results page, then attach or scrape to start.";
+  }
+
+  setTargetStatus(`Locked to ${getTabLabel(state.lockedTab, state.lockedContext?.context)}.`);
+
+  if (isLockedToCurrent && lockedSupported) {
+    const { pageType, headerCount, rowCountEstimate } = state.lockedContext.context;
+    return `Ready on locked ${pageType} tab. Detected ${headerCount} headers and ${rowCountEstimate} visible rows.`;
+  }
+
+  if (activeSupported && !isLockedToCurrent) {
+    return "Panel is locked to another Crunchbase tab. Attach or scrape the current tab to switch.";
+  }
+
+  if (activeCrunchbase && !activeSupported) {
+    return (
+      state.activeContext?.context?.reason ||
+      state.activeContext?.error?.message ||
+      "The current Crunchbase tab is not a supported results table. The panel remains locked to the other tab."
+    );
+  }
+
+  if (isLockedToCurrent && !lockedSupported) {
+    return (
+      state.lockedContext?.context?.reason ||
+      state.lockedContext?.error?.message ||
+      "The locked tab is open, but no supported Crunchbase results table is detected."
+    );
+  }
+
+  return "Panel is locked to another Crunchbase tab. Switch back or attach a new tab.";
 }
 
 async function loadPageContext({ preserveStatus = false, useCachedState = false } = {}) {
   const stored = await getStoredConfig();
-  const tab = await getActiveTab();
-  let crunchbaseTabId = null;
 
   if (useCachedState) {
     renderSummary(stored[STORAGE_KEYS.LAST_RUN_SUMMARY]);
     pageStatusEl.textContent = stored[STORAGE_KEYS.LAST_PAGE_STATUS];
-  }
-
-  if (!tab?.id) {
-    setPageStatus("No active browser tab found.");
-    scrapeButtonEl.disabled = true;
-    debugButtonEl.disabled = true;
-    return;
   }
 
   if (
@@ -139,77 +311,77 @@ async function loadPageContext({ preserveStatus = false, useCachedState = false 
     !stored[STORAGE_KEYS.GOOGLE_SPREADSHEET_ID] ||
     !stored[STORAGE_KEYS.GOOGLE_SHEET_NAME]
   ) {
-    setPageStatus("Google Sheets is not configured yet. Use Google Sheets Settings first.");
-    scrapeButtonEl.disabled = true;
+    setTargetStatus("Google Sheets is not configured.");
+    if (!preserveStatus) {
+      setPageStatus("Use Google Sheets Settings before scraping.");
+    }
+    setButtonState(attachButtonEl, "Attach Current Tab", true);
+    setButtonState(scrapeButtonEl, "Attach & Scrape Current Tab", true);
     debugButtonEl.disabled = true;
     return;
   }
 
-  if (tab.url) {
-    const activeHostname = new URL(tab.url).hostname;
+  const state = await resolvePanelState();
 
-    if (activeHostname === SUPPORTED_HOST) {
-      crunchbaseTabId = tab.id;
-      const response = await getTabContext(tab.id);
-
-      if (response?.ok && response.context?.supported) {
-        const { pageType, headerCount, rowCountEstimate } = response.context;
-        await useResolvedContext(
-          tab.id,
-          response.context,
-          `Ready on ${pageType}. Detected ${headerCount} headers and ${rowCountEstimate} visible rows.`,
-          { preserveStatus }
-        );
-        debugButtonEl.disabled = false;
-        return;
-      }
+  if (!state.activeTab?.id) {
+    setTargetStatus("No active browser tab.");
+    if (!preserveStatus) {
+      setPageStatus("No active browser tab found.");
     }
-  }
-
-  const pinnedTabId = stored[STORAGE_KEYS.PINNED_CRUNCHBASE_TAB_ID];
-
-  if (Number.isInteger(pinnedTabId)) {
-    const pinnedTab = await getTabById(pinnedTabId);
-
-    if (pinnedTab?.url && new URL(pinnedTab.url).hostname === SUPPORTED_HOST) {
-      crunchbaseTabId = pinnedTabId;
-      const response = await getTabContext(pinnedTabId);
-
-      if (response?.ok && response.context?.supported) {
-        const { pageType, headerCount, rowCountEstimate } = response.context;
-        await useResolvedContext(
-          pinnedTabId,
-          response.context,
-          `Using saved Crunchbase tab on ${pageType}. Detected ${headerCount} headers and ${rowCountEstimate} visible rows.`,
-          { preserveStatus }
-        );
-        debugButtonEl.disabled = false;
-        return;
-      }
-    }
-
-    await clearPinnedCrunchbaseTab();
-  }
-
-  if (crunchbaseTabId != null) {
-    targetTabId = crunchbaseTabId;
-    debugButtonEl.disabled = false;
-  } else {
-    targetTabId = null;
+    setButtonState(attachButtonEl, "Attach Current Tab", true);
+    setButtonState(scrapeButtonEl, "Attach & Scrape Current Tab", true);
     debugButtonEl.disabled = true;
+    return;
   }
 
-  setPageStatus("No Crunchbase results table detected.");
-  scrapeButtonEl.disabled = true;
+  applyButtonState(state);
+
+  if (!preserveStatus) {
+    setPageStatus(describePageStatus(state));
+  } else {
+    describePageStatus(state);
+  }
+}
+
+function scheduleRefresh({ preserveStatus = false } = {}) {
+  clearTimeout(refreshTimerId);
+  refreshTimerId = setTimeout(() => {
+    loadPageContext({ preserveStatus }).catch((error) => {
+      setPageStatus("Unable to inspect the current tab.");
+      renderSummary(`Error: ${error.message}`);
+    });
+  }, 120);
 }
 
 async function runScrape() {
-  if (!targetTabId) {
+  let activeState;
+
+  try {
+    activeState = await getSupportedActiveCrunchbaseState();
+  } catch (error) {
+    setPageStatus("Scrape failed.");
+    const summary = `Error: ${error.message}`;
+    renderSummary(summary);
+    await persistPopupState({
+      [STORAGE_KEYS.LAST_RUN_SUMMARY]: summary
+    });
     return;
   }
 
+  const stored = await getStoredConfig();
+  const currentLockedTabId = Number.isInteger(stored[STORAGE_KEYS.PINNED_CRUNCHBASE_TAB_ID])
+    ? stored[STORAGE_KEYS.PINNED_CRUNCHBASE_TAB_ID]
+    : null;
+  const isRetarget = currentLockedTabId !== activeState.tab.id;
+
+  if (isRetarget) {
+    await pinCrunchbaseTab(activeState.tab.id);
+    setTargetStatus(`Locked to ${getTabLabel(activeState.tab, activeState.context)}.`);
+  }
+
+  attachButtonEl.disabled = true;
   scrapeButtonEl.disabled = true;
-  setPageStatus("Scraping the active page…");
+  setPageStatus(isRetarget ? "Attached to current tab. Scraping…" : "Scraping the attached tab…");
   renderSummary("Collecting rendered Crunchbase rows and sending them to Google Sheets...");
   await persistPopupState({
     [STORAGE_KEYS.LAST_RUN_SUMMARY]:
@@ -217,7 +389,7 @@ async function runScrape() {
   });
 
   try {
-    const scrapeResponse = await chrome.tabs.sendMessage(targetTabId, {
+    const scrapeResponse = await chrome.tabs.sendMessage(activeState.tab.id, {
       type: MESSAGE_TYPES.SCRAPE_CURRENT_PAGE
     });
 
@@ -255,15 +427,13 @@ async function runScrape() {
       [STORAGE_KEYS.LAST_RUN_SUMMARY]: lines.join("\n")
     });
 
-    if (result.failures.length > 0) {
-      setPageStatus(
-        result.appendedCount > 0
+    setPageStatus(
+      result.failures.length > 0
+        ? result.appendedCount > 0
           ? "Scrape finished with partial failures."
           : "Scrape failed."
-      );
-    } else {
-      setPageStatus("Scrape finished.");
-    }
+        : "Scrape finished."
+    );
   } catch (error) {
     setPageStatus("Scrape failed.");
     const summary = `Error: ${error.message}`;
@@ -277,21 +447,23 @@ async function runScrape() {
 }
 
 async function captureDebugSnapshot() {
-  if (!targetTabId) {
+  let tabId = targetTabId;
+
+  if (!tabId) {
     const activeTab = await getActiveTab();
 
-    if (!activeTab?.id) {
-      throw new Error("No tab is available for debug capture.");
+    if (!activeTab?.id || !isCrunchbaseTab(activeTab)) {
+      throw new Error("Open or attach a Crunchbase tab before capturing debug data.");
     }
 
-    targetTabId = activeTab.id;
+    tabId = activeTab.id;
   }
 
   debugButtonEl.disabled = true;
   setPageStatus("Capturing debug snapshot…");
 
   try {
-    const response = await chrome.tabs.sendMessage(targetTabId, {
+    const response = await chrome.tabs.sendMessage(tabId, {
       type: MESSAGE_TYPES.CAPTURE_DEBUG_SNAPSHOT
     });
 
@@ -309,7 +481,8 @@ async function captureDebugSnapshot() {
       copied = false;
     }
 
-    const preview = json.length > 4000 ? `${json.slice(0, 4000)}\n... [truncated in popup]` : json;
+    const preview =
+      json.length > 4000 ? `${json.slice(0, 4000)}\n... [truncated in panel]` : json;
     renderSummary(preview);
     await persistPopupState({
       [STORAGE_KEYS.LAST_RUN_SUMMARY]: preview,
@@ -325,6 +498,17 @@ async function captureDebugSnapshot() {
     debugButtonEl.disabled = false;
   }
 }
+
+attachButtonEl.addEventListener("click", () => {
+  attachCurrentTab().catch((error) => {
+    setPageStatus("Attach failed.");
+    const summary = `Error: ${error.message}`;
+    renderSummary(summary);
+    persistPopupState({
+      [STORAGE_KEYS.LAST_RUN_SUMMARY]: summary
+    }).catch(() => {});
+  });
+});
 
 scrapeButtonEl.addEventListener("click", () => {
   runScrape();
@@ -345,8 +529,33 @@ openOptionsEl.addEventListener("click", () => {
   chrome.runtime.openOptionsPage();
 });
 
+chrome.tabs.onActivated.addListener(() => {
+  scheduleRefresh();
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (tabId === targetTabId) {
+    scheduleRefresh();
+  }
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (!changeInfo.status && !changeInfo.url) {
+    return;
+  }
+
+  if (tabId === targetTabId || tab?.active) {
+    scheduleRefresh();
+  }
+});
+
+chrome.windows.onFocusChanged.addListener(() => {
+  scheduleRefresh();
+});
+
 loadPageContext({ useCachedState: true }).catch((error) => {
-  setPageStatus("Unable to inspect the active tab.");
+  setTargetStatus("Unable to inspect the panel state.");
+  setPageStatus("Unable to inspect the current tab.");
   const summary = `Error: ${error.message}`;
   renderSummary(summary);
   persistPopupState({

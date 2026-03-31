@@ -1,6 +1,6 @@
 # OpenCrunch
 
-Chromium Manifest V3 extension that scrapes the currently open Crunchbase results page and appends the visible rows into Google Sheets through a Google Apps Script web app.
+Chromium Manifest V3 extension that opens in a Chrome side panel, locks to one Crunchbase tab at a time, and appends the visible results rows into Google Sheets through a Google Apps Script web app.
 
 ## Load the extension
 
@@ -8,6 +8,7 @@ Chromium Manifest V3 extension that scrapes the currently open Crunchbase result
 2. Enable `Developer mode`.
 3. Click `Load unpacked`.
 4. Select this folder: `/Users/ranax/Downloads/opencrunch`
+5. Click the OpenCrunch toolbar icon to open the side panel.
 
 ## Google Sheets setup
 
@@ -26,7 +27,12 @@ Chromium Manifest V3 extension that scrapes the currently open Crunchbase result
 ## Use it
 
 1. Open a Crunchbase results page that already shows the rows and columns you want.
-2. Open the extension popup.
-3. Click `Scrape Current Page`.
+2. Open the OpenCrunch side panel from the toolbar icon.
+3. Click `Attach Current Tab` or `Attach & Scrape Current Tab`.
 
 The extension appends the currently rendered page only. It does not paginate automatically in v1.
+Missing values are written to Google Sheets as literal `NULL`.
+
+## After changing the Apps Script
+
+If you change `apps-script/Code.gs`, redeploy the Google Apps Script web app so the live endpoint picks up the new behavior.

@@ -3,7 +3,7 @@
   "name": "OpenCrunch",
   "version": "0.1.0",
   "description": "Scrape the current Crunchbase results page and append the visible rows to Google Sheets.",
-  "permissions": ["storage", "tabs"],
+  "permissions": ["storage", "tabs", "sidePanel"],
   "host_permissions": [
     "https://www.crunchbase.com/*",
     "https://script.google.com/*",
@@ -13,9 +13,11 @@
     "service_worker": "src/background.js",
     "type": "module"
   },
+  "side_panel": {
+    "default_path": "src/popup.html"
+  },
   "action": {
-    "default_title": "OpenCrunch",
-    "default_popup": "src/popup.html"
+    "default_title": "OpenCrunch"
   },
   "options_page": "src/options.html",
   "content_scripts": [
